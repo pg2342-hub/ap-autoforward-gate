@@ -1,5 +1,7 @@
 # AP auto-forward gate
 
+**Demo page (sample output and eval results, no install):** https://pg2342-hub.github.io/ap-autoforward-gate/
+
 A small tool for the end of week 2 of an AP automation onboarding at a general contractor. It reads an export of the AI's suggested invoice coding and AP's final coding, and answers two questions:
 
 1. **Which jobs have earned auto-forward to the PM?** A job qualifies when AP accepted the suggested job, cost code, cost type, and commitment unchanged on at least 90% of at least 20 checked invoices.

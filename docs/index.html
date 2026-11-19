@@ -1,0 +1,690 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AP auto-forward gate</title>
+<meta name="description" content="Decides which construction jobs have earned AP auto-forward and which invoices AP must still clear before the ERP sync.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#000;--mute:#555;--line:#d9d9d9;--soft:#f5f5f5;--bg:#fff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:980px;margin:0 auto;padding:40px 16px 64px}
+a{color:var(--ink)}
+header .kicker{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute);margin:0 0 6px}
+h1{font-size:30px;line-height:1.2;margin:0 0 12px;letter-spacing:-.01em}
+.lede{font-size:16px;max-width:760px}
+.lede p{margin:0 0 10px}
+.links{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0 6px}
+.btn{display:inline-block;border:1.5px solid var(--ink);padding:7px 14px;border-radius:6px;text-decoration:none;font-weight:600;font-size:14px}
+.btn.primary{background:var(--ink);color:#fff}
+.note{font-size:13px;color:var(--mute);margin-top:10px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:28px 0 8px}
+.tile{border:1px solid var(--line);border-radius:8px;padding:14px 16px;background:var(--soft)}
+.tile .n{font-size:24px;font-weight:700;line-height:1.2;font-variant-numeric:tabular-nums}
+.tile .l{font-size:13px;color:var(--mute);margin-top:4px}
+section{margin-top:40px;border-top:1px solid var(--line);padding-top:20px}
+h2{font-size:20px;margin:0 0 12px}
+h3{font-size:16px;margin:22px 0 8px}
+h4{font-size:14px;margin:18px 0 6px}
+.tw{overflow-x:auto;margin:10px 0 16px;border:1px solid var(--line);border-radius:6px}
+table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
+th,td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{background:var(--soft);font-weight:600;white-space:nowrap}
+tr:last-child td{border-bottom:0}
+code{font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--soft);padding:1px 4px;border-radius:3px}
+pre{background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:12px 14px;overflow-x:auto}
+pre code{background:none;padding:0}
+img{max-width:100%;height:auto;border:1px solid var(--line);border-radius:6px}
+footer{margin-top:48px;font-size:12px;color:var(--mute);border-top:1px solid var(--line);padding-top:14px}
+</style></head>
+<body><main>
+<header>
+<p class="kicker">Demo · ap-autoforward-gate</p>
+<h1>AP auto-forward gate</h1>
+<div class="lede"><p>A small tool for the end of week 2 of an AP automation onboarding at a general contractor. It reads an export of the AI's suggested invoice coding and AP's final coding, and answers two questions:</p>
+<ol>
+<li><strong>Which jobs have earned auto-forward to the PM?</strong> A job qualifies when AP accepted the suggested job, cost code, cost type, and commitment unchanged on at least 90% of at least 20 checked invoices.</li>
+<li><strong>Which invoices must AP still clear before they sync to Sage, even on those jobs, and why?</strong> On an auto-forwarded job Agave still sends every invoice to the PM. AP writes each rule below as a plain-language auto-tagging rule in Agave and clears every tagged invoice before the daily sync. In this tool's output, <code>AP REVIEW</code> means AP touches the invoice before it reaches the ERP, and <code>AUTO-FORWARD TO PM</code> means it goes from PM approval to the daily sync with no AP touch.</li>
+</ol>
+<p>Each rule below puts an invoice in AP's queue before sync, whatever its job's status.</p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Rule</th>
+<th>Why AP clears it before sync</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>No PO or subcontract match</td>
+<td>Nothing to inherit cost codes from, so coding is a judgment call</td>
+</tr>
+<tr>
+<td>Overbilling</td>
+<td>The invoice would bill a contract line past its scheduled value</td>
+</tr>
+<tr>
+<td>Unallocated amount</td>
+<td>Coded lines do not add up to the invoice total, net of tax</td>
+</tr>
+<tr>
+<td>New vendor</td>
+<td>Vendor added to the vendor master after the pilot started</td>
+</tr>
+<tr>
+<td>Possible duplicate</td>
+<td>Same vendor and invoice number (any letter case), or same vendor and amount within 14 days</td>
+</tr>
+<tr>
+<td>No tax on materials</td>
+<td>A supplier invoice with no sales tax, so check the exemption or accrue use tax</td>
+</tr>
+<tr>
+<td>Sub charged tax on capital improvement work</td>
+<td>Under New York rules a subcontractor on a capital improvement job (Form ST-124 on file) should not charge sales tax</td>
+</tr>
+<tr>
+<td>Job tax status unknown</td>
+<td>The job was never recorded as a capital improvement or repair at kickoff, so the tax rules cannot run</td>
+</tr>
+</tbody>
+</table></div>
+<p>It is built around how Agave's AP Automation is documented to work (AP draft check, PM approval, auto-forward set per project, auto-sync set per account), so a team can switch auto-forward on job by job while AP keeps daily sync and clears tagged invoices first. Agave already checks for duplicates on its own; the tool repeats that rule so the eval covers every reason an invoice reaches AP.</p></div>
+<div class="links"><a class="btn primary" href="https://github.com/pg2342-hub/ap-autoforward-gate">View the code on GitHub</a><a class="btn" href="#run">Run it yourself</a></div>
+<p class="note">The sample is synthetic. No job, vendor, amount, or coding error comes from a real company. Not affiliated with Agave or any contractor. Everything on this page is the committed output of the code in the repository.</p>
+</header>
+<div class="tiles"><div class="tile"><div class="n">5 of 8</div><div class="l">jobs clear the 90% / 20-invoice bar for auto-forward</div></div><div class="tile"><div class="n">57 of 110</div><div class="l">invoices go from PM approval straight to the daily sync</div></div><div class="tile"><div class="n">30 of 30</div><div class="l">hand-labeled eval cases match, 0 unsafe auto-forwards</div></div><div class="tile"><div class="n">8 rules</div><div class="l">that send an invoice to AP before sync on any job</div></div></div>
+<section><h2>Sample output: the week-2 gate report</h2><p>Gate: at least 90% of at least 20 AP-checked invoices accepted unchanged on job, cost code, cost type, and commitment.</p>
+<h3>1. Which jobs are ready for auto-forward</h3>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Job</th>
+<th>Tax status</th>
+<th style="text-align: right;">Checked</th>
+<th style="text-align: right;">Accepted unchanged</th>
+<th style="text-align: right;">Rate</th>
+<th>Most-corrected field</th>
+<th>Decision</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>J101 Apparel flagship fit-out</td>
+<td>capital_improvement</td>
+<td style="text-align: right;">30</td>
+<td style="text-align: right;">29</td>
+<td style="text-align: right;">97%</td>
+<td>cost_type</td>
+<td>AUTO-FORWARD</td>
+</tr>
+<tr>
+<td>J102 Restaurant fit-out</td>
+<td>capital_improvement</td>
+<td style="text-align: right;">26</td>
+<td style="text-align: right;">25</td>
+<td style="text-align: right;">96%</td>
+<td>job_id</td>
+<td>AUTO-FORWARD</td>
+</tr>
+<tr>
+<td>J103 Hospitality venue renovation</td>
+<td>capital_improvement</td>
+<td style="text-align: right;">24</td>
+<td style="text-align: right;">22</td>
+<td style="text-align: right;">92%</td>
+<td>cost_code</td>
+<td>AUTO-FORWARD</td>
+</tr>
+<tr>
+<td>J104 Store refresh (repair work)</td>
+<td>repair</td>
+<td style="text-align: right;">22</td>
+<td style="text-align: right;">19</td>
+<td style="text-align: right;">86%</td>
+<td>cost_code</td>
+<td>STAY ON FULL REVIEW (below bar)</td>
+</tr>
+<tr>
+<td>J105 Department store shop-in-shop</td>
+<td>capital_improvement</td>
+<td style="text-align: right;">25</td>
+<td style="text-align: right;">24</td>
+<td style="text-align: right;">96%</td>
+<td>cost_type</td>
+<td>AUTO-FORWARD</td>
+</tr>
+<tr>
+<td>J106 Fast-casual restaurant (legacy cost codes)</td>
+<td>capital_improvement</td>
+<td style="text-align: right;">28</td>
+<td style="text-align: right;">21</td>
+<td style="text-align: right;">75%</td>
+<td>cost_code</td>
+<td>STAY ON FULL REVIEW (below bar)</td>
+</tr>
+<tr>
+<td>J107 Showroom build-out</td>
+<td>unknown</td>
+<td style="text-align: right;">21</td>
+<td style="text-align: right;">20</td>
+<td style="text-align: right;">95%</td>
+<td>cost_type</td>
+<td>AUTO-FORWARD</td>
+</tr>
+<tr>
+<td>J108 Store maintenance (repair work)</td>
+<td>repair</td>
+<td style="text-align: right;">9</td>
+<td style="text-align: right;">9</td>
+<td style="text-align: right;">100%</td>
+<td>-</td>
+<td>STAY ON FULL REVIEW (too few invoices)</td>
+</tr>
+</tbody>
+</table></div>
+<p>5 of 8 jobs ready.</p>
+<h3>2. Invoices after the window: where each one goes</h3>
+<p>57 of 110 invoices auto-forward to the PM; 53 need AP before sync.</p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Reason AP clears an invoice before sync</th>
+<th style="text-align: right;">Invoices</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Job tax status (capital improvement or repair) not recorded at kickoff</td>
+<td style="text-align: right;">12</td>
+</tr>
+<tr>
+<td>Would bill the contract line past its scheduled value</td>
+<td style="text-align: right;">3</td>
+</tr>
+<tr>
+<td>No PO or subcontract match</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td>Coded lines do not add up to the invoice total (net of tax)</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td>Vendor added to the vendor master after the pilot started</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td>Materials invoice with no sales tax: check the exemption or accrue use tax</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td>Subcontractor charged sales tax on a capital improvement job (ST-124 on file)</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td>Same vendor and invoice number, or same vendor and amount within 14 days</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td>Job not yet on auto-forward (no other reason)</td>
+<td style="text-align: right;">32</td>
+</tr>
+</tbody>
+</table></div>
+<h3>3. AP queue (invoices AP clears before sync, and why)</h3>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>Invoice</th>
+<th>Received</th>
+<th>Job</th>
+<th>Vendor</th>
+<th style="text-align: right;">Total</th>
+<th>Reasons</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>INV-0157</td>
+<td>2026-12-21</td>
+<td>J104</td>
+<td>V305</td>
+<td style="text-align: right;">6,833.03</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0227</td>
+<td>2026-12-21</td>
+<td>J106</td>
+<td>V301</td>
+<td style="text-align: right;">6,921.11</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0150</td>
+<td>2026-12-22</td>
+<td>J104</td>
+<td>V305</td>
+<td style="text-align: right;">4,457.87</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0265</td>
+<td>2026-12-22</td>
+<td>J107</td>
+<td>V302</td>
+<td style="text-align: right;">1,415.18</td>
+<td>Job tax status (capital improvement or repair) not recorded at kickoff</td>
+</tr>
+<tr>
+<td>INV-0271</td>
+<td>2026-12-22</td>
+<td>J107</td>
+<td>V302</td>
+<td style="text-align: right;">1,737.07</td>
+<td>Job tax status (capital improvement or repair) not recorded at kickoff</td>
+</tr>
+<tr>
+<td>INV-0286</td>
+<td>2026-12-22</td>
+<td>J108</td>
+<td>V306</td>
+<td style="text-align: right;">8,779.57</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-9001</td>
+<td>2026-12-22</td>
+<td>J101</td>
+<td>V203</td>
+<td style="text-align: right;">612.40</td>
+<td>No PO or subcontract match</td>
+</tr>
+<tr>
+<td>INV-9002</td>
+<td>2026-12-22</td>
+<td>J102</td>
+<td>V304</td>
+<td style="text-align: right;">48,476.43</td>
+<td>Would bill the contract line past its scheduled value</td>
+</tr>
+<tr>
+<td>INV-9003</td>
+<td>2026-12-22</td>
+<td>J103</td>
+<td>V201</td>
+<td style="text-align: right;">1,306.50</td>
+<td>Coded lines do not add up to the invoice total (net of tax)</td>
+</tr>
+<tr>
+<td>INV-9004</td>
+<td>2026-12-22</td>
+<td>J105</td>
+<td>V399</td>
+<td style="text-align: right;">870.98</td>
+<td>Vendor added to the vendor master after the pilot started</td>
+</tr>
+<tr>
+<td>INV-9006</td>
+<td>2026-12-22</td>
+<td>J105</td>
+<td>V202</td>
+<td style="text-align: right;">940.00</td>
+<td>Materials invoice with no sales tax: check the exemption or accrue use tax</td>
+</tr>
+<tr>
+<td>INV-9007</td>
+<td>2026-12-22</td>
+<td>J103</td>
+<td>V303</td>
+<td style="text-align: right;">5,443.75</td>
+<td>Subcontractor charged sales tax on a capital improvement job (ST-124 on file)</td>
+</tr>
+<tr>
+<td>INV-0152</td>
+<td>2026-12-23</td>
+<td>J104</td>
+<td>V201</td>
+<td style="text-align: right;">1,843.85</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0226</td>
+<td>2026-12-23</td>
+<td>J106</td>
+<td>V302</td>
+<td style="text-align: right;">4,732.34</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0237</td>
+<td>2026-12-23</td>
+<td>J106</td>
+<td>V305</td>
+<td style="text-align: right;">2,297.90</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0267</td>
+<td>2026-12-23</td>
+<td>J107</td>
+<td>V306</td>
+<td style="text-align: right;">2,806.69</td>
+<td>Job tax status (capital improvement or repair) not recorded at kickoff</td>
+</tr>
+<tr>
+<td>INV-0272</td>
+<td>2026-12-23</td>
+<td>J107</td>
+<td>V203</td>
+<td style="text-align: right;">163.82</td>
+<td>Job tax status (capital improvement or repair) not recorded at kickoff</td>
+</tr>
+<tr>
+<td>INV-0229</td>
+<td>2026-12-24</td>
+<td>J106</td>
+<td>V302</td>
+<td style="text-align: right;">8,156.95</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0230</td>
+<td>2026-12-24</td>
+<td>J106</td>
+<td>V302</td>
+<td style="text-align: right;">1,548.64</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0231</td>
+<td>2026-12-24</td>
+<td>J106</td>
+<td>V306</td>
+<td style="text-align: right;">1,649.24</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-9005</td>
+<td>2026-12-24</td>
+<td>J101</td>
+<td>V306</td>
+<td style="text-align: right;">6,581.89</td>
+<td>Same vendor and invoice number, or same vendor and amount within 14 days</td>
+</tr>
+<tr>
+<td>INV-0233</td>
+<td>2026-12-25</td>
+<td>J106</td>
+<td>V306</td>
+<td style="text-align: right;">6,352.72</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0147</td>
+<td>2026-12-28</td>
+<td>J104</td>
+<td>V203</td>
+<td style="text-align: right;">1,980.80</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0149</td>
+<td>2026-12-28</td>
+<td>J104</td>
+<td>V302</td>
+<td style="text-align: right;">6,796.72</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0232</td>
+<td>2026-12-28</td>
+<td>J106</td>
+<td>V305</td>
+<td style="text-align: right;">2,155.85</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0266</td>
+<td>2026-12-28</td>
+<td>J107</td>
+<td>V304</td>
+<td style="text-align: right;">5,327.90</td>
+<td>Job tax status (capital improvement or repair) not recorded at kickoff</td>
+</tr>
+<tr>
+<td>INV-0268</td>
+<td>2026-12-28</td>
+<td>J107</td>
+<td>V306</td>
+<td style="text-align: right;">5,236.29</td>
+<td>Job tax status (capital improvement or repair) not recorded at kickoff</td>
+</tr>
+<tr>
+<td>INV-0269</td>
+<td>2026-12-28</td>
+<td>J107</td>
+<td>V305</td>
+<td style="text-align: right;">3,832.87</td>
+<td>Job tax status (capital improvement or repair) not recorded at kickoff</td>
+</tr>
+<tr>
+<td>INV-0285</td>
+<td>2026-12-28</td>
+<td>J108</td>
+<td>V301</td>
+<td style="text-align: right;">7,676.71</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0154</td>
+<td>2026-12-29</td>
+<td>J104</td>
+<td>V306</td>
+<td style="text-align: right;">7,513.69</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0156</td>
+<td>2026-12-29</td>
+<td>J104</td>
+<td>V202</td>
+<td style="text-align: right;">1,632.08</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0236</td>
+<td>2026-12-29</td>
+<td>J106</td>
+<td>V201</td>
+<td style="text-align: right;">876.94</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0238</td>
+<td>2026-12-29</td>
+<td>J106</td>
+<td>V302</td>
+<td style="text-align: right;">8,796.94</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0240</td>
+<td>2026-12-29</td>
+<td>J106</td>
+<td>V301</td>
+<td style="text-align: right;">5,457.50</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0262</td>
+<td>2026-12-29</td>
+<td>J107</td>
+<td>V203</td>
+<td style="text-align: right;">778.09</td>
+<td>Job tax status (capital improvement or repair) not recorded at kickoff</td>
+</tr>
+<tr>
+<td>INV-0287</td>
+<td>2026-12-29</td>
+<td>J108</td>
+<td>V305</td>
+<td style="text-align: right;">6,573.40</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0148</td>
+<td>2026-12-30</td>
+<td>J104</td>
+<td>V301</td>
+<td style="text-align: right;">8,912.82</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0151</td>
+<td>2026-12-30</td>
+<td>J104</td>
+<td>V202</td>
+<td style="text-align: right;">2,538.18</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0155</td>
+<td>2026-12-30</td>
+<td>J104</td>
+<td>V304</td>
+<td style="text-align: right;">4,783.30</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0228</td>
+<td>2026-12-30</td>
+<td>J106</td>
+<td>V203</td>
+<td style="text-align: right;">1,139.64</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0263</td>
+<td>2026-12-30</td>
+<td>J107</td>
+<td>V304</td>
+<td style="text-align: right;">5,243.95</td>
+<td>Job tax status (capital improvement or repair) not recorded at kickoff</td>
+</tr>
+<tr>
+<td>INV-0264</td>
+<td>2026-12-30</td>
+<td>J107</td>
+<td>V304</td>
+<td style="text-align: right;">7,709.36</td>
+<td>Job tax status (capital improvement or repair) not recorded at kickoff</td>
+</tr>
+<tr>
+<td>INV-0270</td>
+<td>2026-12-30</td>
+<td>J107</td>
+<td>V304</td>
+<td style="text-align: right;">6,966.67</td>
+<td>Job tax status (capital improvement or repair) not recorded at kickoff</td>
+</tr>
+<tr>
+<td>INV-0288</td>
+<td>2026-12-30</td>
+<td>J108</td>
+<td>V305</td>
+<td style="text-align: right;">5,510.45</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0080</td>
+<td>2026-12-31</td>
+<td>J102</td>
+<td>V304</td>
+<td style="text-align: right;">7,834.12</td>
+<td>Would bill the contract line past its scheduled value</td>
+</tr>
+<tr>
+<td>INV-0273</td>
+<td>2026-12-31</td>
+<td>J107</td>
+<td>V203</td>
+<td style="text-align: right;">1,526.47</td>
+<td>Job tax status (capital improvement or repair) not recorded at kickoff</td>
+</tr>
+<tr>
+<td>INV-0283</td>
+<td>2026-12-31</td>
+<td>J108</td>
+<td>V305</td>
+<td style="text-align: right;">5,893.70</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0284</td>
+<td>2026-12-31</td>
+<td>J108</td>
+<td>V301</td>
+<td style="text-align: right;">5,109.35</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0153</td>
+<td>2027-01-01</td>
+<td>J104</td>
+<td>V305</td>
+<td style="text-align: right;">7,492.88</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0158</td>
+<td>2027-01-01</td>
+<td>J104</td>
+<td>V304</td>
+<td style="text-align: right;">7,137.87</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0234</td>
+<td>2027-01-01</td>
+<td>J106</td>
+<td>V305</td>
+<td style="text-align: right;">6,867.67</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0235</td>
+<td>2027-01-01</td>
+<td>J106</td>
+<td>V304</td>
+<td style="text-align: right;">3,706.31</td>
+<td>Job not yet on auto-forward</td>
+</tr>
+<tr>
+<td>INV-0239</td>
+<td>2027-01-01</td>
+<td>J106</td>
+<td>V201</td>
+<td style="text-align: right;">891.54</td>
+<td>Would bill the contract line past its scheduled value</td>
+</tr>
+</tbody>
+</table></div></section><section><h2>Eval</h2><p><code>eval/</code> holds 30 hand-written invoices after a gate window, each labeled by hand with the route and tags it should get, covering every rule and its edge cases (exactly at the scheduled value, one cent unallocated, 14 versus 15 days for duplicates, tax on repair versus capital improvement jobs, invoices that hit several rules). The pass bar is 30 of 30 and zero unsafe auto-forwards. The first run scored 27 of 30. All three misses were errors in the eval set, not the tool: two cases reused an amount from an earlier case for the same vendor, which the duplicate rule correctly caught, and one sat exactly on the 14-day boundary before I had decided whether day 14 counts; I settled on "within 14 days" including day 14 and moved the case. The labels are written by hand and kept apart from the code, but they follow the same rules the code implements, so the eval checks that the code does what the rules say, not that the rules are right. The cases were fixed and the run is now 30 of 30 with zero unsafe auto-forwards.</p></section><section><h2>Limits</h2><ul>
+<li>The sample is synthetic. No job, vendor, amount, or coding error comes from a real company.</li>
+<li>Each invoice is coded to one line; split coding would compare each line.</li>
+<li>Once a contract line is overbilled, later invoices on it are tagged too until AP clears the line. Overbilling compares the invoice net of tax with the line's scheduled value. It does not model retainage or change orders not yet in the ERP.</li>
+<li>The tax rules are a screen, not tax advice: they decide which invoices a person looks at.</li>
+<li>Not affiliated with Agave or any contractor.</li>
+</ul></section>
+<section id="run"><h2>Run it yourself</h2><p>Python 3.9 or newer, standard library only.</p>
+<pre><code>python gate.py                       # bundled synthetic sample
+python gate.py --out report.md       # also write the full AP queue
+python gate.py --threshold 0.95 --min-invoices 25
+python eval/run_eval.py              # hand-labeled eval set
+python -m unittest discover -s tests
+</code></pre>
+<p>On the sample, 5 of 8 jobs clear the bar. J104 (86%) and J106 (75%, legacy cost codes) stay on full review, and J108 has only 9 invoices. J107 clears the coding bar but AP still clears every one of its invoices, because its tax status was never recorded. After the window, 57 of 110 invoices go from PM approval straight to the daily sync and 53 need AP before sync; see <code>sample_report.md</code>.</p><p>Code: <a href="https://github.com/pg2342-hub/ap-autoforward-gate">https://github.com/pg2342-hub/ap-autoforward-gate</a></p></section>
+<footer>Source and full README at <a href="https://github.com/pg2342-hub/ap-autoforward-gate">https://github.com/pg2342-hub/ap-autoforward-gate</a>.</footer>
+</main></body></html>
