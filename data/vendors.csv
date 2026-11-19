@@ -1,0 +1,12 @@
+vendor_id,name,vendor_type,added_on
+V201,Metro Lumber Supply,supplier,2019-03-01
+V202,Five Boroughs Hardware,supplier,2019-03-01
+V203,Tri-State Rentals,supplier,2019-03-01
+V204,Hudson Drywall Supply,supplier,2019-03-01
+V301,Ironbound Drywall,subcontractor,2018-06-15
+V302,Harbor Flooring,subcontractor,2018-06-15
+V303,Northside Painting,subcontractor,2018-06-15
+V304,Atlas Millwork,subcontractor,2018-06-15
+V305,Empire Mechanical,subcontractor,2018-06-15
+V306,Brightline Electric,subcontractor,2018-06-15
+V399,Quickfix Glass,supplier,2026-12-21

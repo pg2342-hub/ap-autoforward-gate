@@ -1,0 +1,9 @@
+job_id,name,tax_status
+J101,Apparel flagship fit-out,capital_improvement
+J102,Restaurant fit-out,capital_improvement
+J103,Hospitality venue renovation,capital_improvement
+J104,Store refresh (repair work),repair
+J105,Department store shop-in-shop,capital_improvement
+J106,Fast-casual restaurant (legacy cost codes),capital_improvement
+J107,Showroom build-out,unknown
+J108,Store maintenance (repair work),repair

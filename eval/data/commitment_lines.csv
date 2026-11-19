@@ -1,0 +1,10 @@
+commitment_id,line,job_id,vendor_id,description,cost_code,cost_type,scheduled_value,billed_to_date
+PO-E1,1,E1,S1,Materials,06-100,M,100000.00,0.00
+SC-E1,1,E1,B1,Drywall,09-250,S,100000.00,0.00
+PO-E2,1,E2,S1,Materials,06-100,M,100000.00,0.00
+SC-E2,1,E2,B1,Drywall,09-250,S,100000.00,0.00
+PO-E3,1,E3,S1,Materials,06-100,M,100000.00,0.00
+SC-E3,1,E3,B1,Drywall,09-250,S,100000.00,0.00
+PO-E4,1,E4,S1,Materials,06-100,M,100000.00,0.00
+SC-E4,1,E4,B1,Drywall,09-250,S,100000.00,0.00
+SC-E1T,1,E1,B1,Millwork,12-300,S,10000.00,9000.00

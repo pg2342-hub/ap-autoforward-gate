@@ -1,0 +1,5 @@
+vendor_id,name,vendor_type,added_on
+S1,Supplier One,supplier,2020-01-01
+B1,Sub One,subcontractor,2020-01-01
+S9,New Supplier,supplier,2027-03-10
+S8,Old Supplier added day before start,supplier,2027-02-28

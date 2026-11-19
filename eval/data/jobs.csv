@@ -1,0 +1,5 @@
+job_id,name,tax_status
+E1,Eval fit-out,capital_improvement
+E2,Eval repair,repair
+E3,Eval small job,capital_improvement
+E4,Eval no tax status,
